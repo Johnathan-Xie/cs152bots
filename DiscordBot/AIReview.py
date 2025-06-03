@@ -2,10 +2,9 @@ from enum import Enum, auto
 import discord
 import re
 from common_state import State, review_flow_config, ReviewFlow
-
     
-class Review:
-    START_KEYWORD = "review"
+class AIReview:
+    START_KEYWORD = "ai_review"
     CANCEL_KEYWORD = "cancel"
     HELP_KEYWORD = "help"
 
@@ -58,12 +57,13 @@ class Review:
         if message.content == self.CANCEL_KEYWORD:
             self.state = State.REVIEW_COMPLETE
             self.client.mode = "None"
-            self.client.manual_reviews.pop(message.author.id)
-            self.client.reports_to_review.pop(self.channel_message_id)
+            self.client.ai_manual_reviews.pop(message.author.id)
+            self.client.ai_reports_to_review.pop(self.channel_message_id)
+                
             return ["Review completed."]
         
         elif self.state == State.REVIEW_START:
-            reply =  "Thank you for starting the review process. "
+            reply =  "Thank you for starting the AI review process. "
             reply += "Say `help` at any time for more information.\n\n"
             reply += "Please copy paste the link to the message from the mod channel you want to review.\n"
             reply += "You can obtain this link by right-clicking the message and clicking `Copy Message Link`."
@@ -88,14 +88,14 @@ class Review:
             except discord.errors.NotFound:
                 return ["It seems this message was deleted or never existed. Please try again or say `cancel` to cancel."]
             self.channel_message_id = int(m.group(3))
-            report = self.client.reports_to_review[int(m.group(3))]
+            ai_report = self.client.ai_reports_to_review[int(m.group(3))]
 
             self.state = State.IN_REVIEW_FLOW
-            self.target_report = report
+            self.target_report = ai_report
             return [
                 "I found this message:", "```"
-                + report.target_message.author.name + ": "
-                + report.target_message.content
+                + ai_report.target_message.author.name + ": "
+                + ai_report.target_message.content
                 + "```" + "\n"
                 + self.review_flow.get_current_message()]
         elif self.state == State.IN_REVIEW_FLOW:
@@ -105,8 +105,8 @@ class Review:
                     warn_result = await self.warn_user(False)
                     to_return = remove_result + warn_result 
                     self.client.mode = "None"
-                    self.client.manual_reviews.pop(message.author.id)
-                    self.client.reports_to_review.pop(self.channel_message_id)
+                    self.client.ai_manual_reviews.pop(message.author.id)
+                    self.client.ai_reports_to_review.pop(self.channel_message_id)
                     if self.review_flow.state == "remove_post_warn_user":
                         return to_return
                     else:
@@ -116,22 +116,22 @@ class Review:
                 elif self.review_flow.state == "remove_post":
                     remove_result = await self.remove_message()
                     self.client.mode = "None"
-                    self.client.manual_reviews.pop(message.author.id)
-                    self.client.reports_to_review.pop(self.channel_message_id)
+                    self.client.ai_manual_reviews.pop(message.author.id)
+                    self.client.ai_reports_to_review.pop(self.channel_message_id)
                     return remove_result
                 
                 elif self.review_flow.state == "warn_reporting_user":
                     warn_result = await self.warn_user(True)
                     self.client.mode = "None"
-                    self.client.manual_reviews.pop(message.author.id)
-                    self.client.reports_to_review.pop(self.channel_message_id)
+                    self.client.ai_manual_reviews.pop(message.author.id)
+                    self.client.ai_reports_to_review.pop(self.channel_message_id)
                     return warn_result
         
                 if self.review_flow.in_terminal_state():
                     self.state = State.REVIEW_COMPLETE
                     self.client.mode = "None"
-                    self.client.manual_reviews.pop(message.author.id)
-                    self.client.reports_to_review.pop(self.channel_message_id)
+                    self.client.ai_manual_reviews.pop(message.author.id)
+                    self.client.ai_reports_to_review.pop(self.channel_message_id)
                 
                 return [
                     self.review_flow.get_current_message()
@@ -149,6 +149,6 @@ class Review:
     
     def review_complete(self):
         self.client.mode = "None"
-        #self.client.manual_reviews.pop(message.author.id)
-        self.client.reports_to_review.pop(self.channel_message_id)
+        #self.client.ai_manual_reviews.pop(message.author.id)
+        self.client.ai_reports_to_review.pop(self.channel_message_id)
         return self.state == State.REVIEW_COMPLETE
