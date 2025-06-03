@@ -6,6 +6,8 @@ import logging
 import re
 from report import Report
 from review import Review
+from AIReport import AIReport
+from AIReview import AIReview
 
 # --- ML model setup -------------------------------------------------
 import torch
@@ -65,9 +67,14 @@ class ModBot(discord.Client):
         self.mod_channels = {} # Map from guild to the mod channel id for that guild
         self.reports = {} # Map from user IDs to the state of their report
         self.reports_to_review = {} # Stores channel messages in mod channel to review
+        self.ai_reports_to_review = {} #The channel message id corresponding to the AI report --> AI Report
         self.name_to_id = {} #Map from a user name (written in message in mod channel) to user id (used to get correct report for user)
         self.manual_reviews = {} #Map from moderator id to review
+        self.ai_manual_reviews = {} #Map from mod id to ai review
 
+        self.mode = None
+
+ 
     async def on_ready(self):
         print(f'{self.user.name} has connected to Discord! It is these guilds:')
         for guild in self.guilds:
@@ -148,32 +155,61 @@ class ModBot(discord.Client):
             # Forward the message to the mod channel
             mod_channel = self.mod_channels[message.guild.id]
             await mod_channel.send(f'Forwarded message:\n{message.author.name}: "{message.content}"')
-            scores = await self.eval_text(message.content)
-            await mod_channel.send(self.code_format(scores))
-        
+            #scores = await self.eval_text(message.content)
+            #await mod_channel.send(self.code_format(scores))
+
+            m = await classify_text(message.content)
+            if m != 'benign':
+                ai_report = AIReport(self, message)
+
+                for guild in self.guilds:
+                    for channel in guild.text_channels:
+                        if channel.name == f'group-{self.group_num}-mod':
+                            mod_channel_message = await channel.send(
+                                           f"""Message automatically flagged for anti-lgbtq sentiment\n"""
+                                           f"""Flagged message author: {message.author.name}\n"""
+                                           f"""Reported message content: "{message.content}\n"""
+                                           f"""**Report Details**\n WE CAN PUT MESSAGE SCORE FOR MODERATOR TO SEE HERE"""
+                            )
+                            self.ai_reports_to_review[mod_channel_message.id] = ai_report
+                            await channel.send("Type 'ai_review' to manually review the reported message" )
         elif message.channel.name == f'group-{self.group_num}-mod':
             # Handle a help message
             if message.content == Review.HELP_KEYWORD:
-                reply =  "Use the `review` command to begin the review process.\n"
+                reply =  "Use the `review` command to begin the review process and the 'ai_review' command to begin the ai flagging review process.\n"
                 reply += "Use the `cancel` command to cancel the review process.\n"
                 await message.channel.send(reply)
                 return
 
             author_id = message.author.id
             responses = []
+            if message.content.lower().startswith(Review.START_KEYWORD) or self.mode == 'review':
+        
 
-            # Only respond to messages if they're part of a reporting flow
-            if author_id not in self.manual_reviews and not message.content.lower().startswith(Review.START_KEYWORD):
-                return
+                # If we don't currently have an active review for this moderator, add one
+                if author_id not in self.manual_reviews:
+                    self.mode = 'review'
+                    self.manual_reviews[author_id] = Review(self)
 
-            # If we don't currently have an active review for this moderator, add one
-            if author_id not in self.manual_reviews:
-                self.manual_reviews[author_id] = Review(self)
+                # Let the review class handle this message; forward all the messages it returns to us
+                responses = await self.manual_reviews[author_id].handle_message(message)
+                for r in responses:
+                    await message.channel.send(r)
 
-            # Let the review class handle this message; forward all the messages it returns to us
-            responses = await self.manual_reviews[author_id].handle_message(message)
-            for r in responses:
-                await message.channel.send(r)
+            elif message.content.lower().startswith(AIReview.START_KEYWORD) or self.mode == 'ai_review':
+
+
+                # If we don't currently have an active review for this moderator, add one
+                if author_id not in self.ai_manual_reviews:
+                    self.mode = 'ai_review'
+                    self.ai_manual_reviews[author_id] = AIReview(self)
+
+                # Let the review class handle this message; forward all the messages it returns to us
+                responses = await self.ai_manual_reviews[author_id].handle_message(message)
+                for r in responses:
+                    await message.channel.send(r)
+
+            return
 
 
     
