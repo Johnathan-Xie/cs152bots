@@ -6,11 +6,12 @@ import re
     
 class AIReport:
 
-    def __init__(self, client, target_message):
+    def __init__(self, client, target_message, score):
         self.client = client
         self.target_message = target_message
         certainty_value = None
         self.reporting_user = "AI Bot"
+        self.score = score
 
 
    

@@ -8,6 +8,7 @@ from report import Report
 from review import Review
 from AIReport import AIReport
 from AIReview import AIReview
+import torch.nn.functional as F
 
 # --- ML model setup -------------------------------------------------
 import torch
@@ -28,15 +29,20 @@ model.eval()                               # inference mode
 
 import asyncio
 
-async def classify_text(text: str) -> str:
-    """Return 'benign' or 'lgbtq_hate' for a given message."""
+async def classify_text(text: str) -> tuple[str, float]:
+    """
+    Return (label, score) where label ∈ {'benign', 'lgbtq_hate'}
+    and score ∈ [0, 1] be the model's confidence for the predicted label.
+    """
     def _predict(t):
         inputs = TOKENIZER(t, return_tensors="pt",
                            truncation=True, padding=True)
         with torch.no_grad():
-            logits = model(**inputs).logits
-        pred_id = int(torch.argmax(logits, dim=-1).item())
-        return LABEL_MAP[pred_id]
+            logits = model(**inputs).logits          # shape [1, 2]
+        probs = F.softmax(logits, dim=-1)            # convert to probabilities
+        pred_id = int(torch.argmax(probs, dim=-1))   # 0 or 1
+        score = float(probs[0, pred_id].item())      # confidence for that class
+        return LABEL_MAP[pred_id], score
 
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _predict, text)
@@ -155,24 +161,26 @@ class ModBot(discord.Client):
             # Forward the message to the mod channel
             mod_channel = self.mod_channels[message.guild.id]
             await mod_channel.send(f'Forwarded message:\n{message.author.name}: "{message.content}"')
-            #scores = await self.eval_text(message.content)
+            #scores, confidence = await self.eval_text(message.content)
             #await mod_channel.send(self.code_format(scores))
 
-            m = await classify_text(message.content)
+            m , score = await classify_text(message.content)
             if m != 'benign':
-                ai_report = AIReport(self, message)
+                ai_report = AIReport(self, message, score)
 
                 for guild in self.guilds:
                     for channel in guild.text_channels:
                         if channel.name == f'group-{self.group_num}-mod':
                             mod_channel_message = await channel.send(
-                                           f"""Message automatically flagged for anti-lgbtq sentiment\n"""
-                                           f"""Flagged message author: {message.author.name}\n"""
-                                           f"""Reported message content: "{message.content}\n"""
-                                           f"""**Report Details**\n WE CAN PUT MESSAGE SCORE FOR MODERATOR TO SEE HERE"""
+                                f"Message automatically flagged for anti‑lgbtq sentiment\n"
+                                f"Author: {message.author.name}\n"
+                                f'Content: "{message.content}"\n'
+                                f"Model confidence: {score:.3f}\n"
+                                "Type 'ai_review' to manually review"
                             )
                             self.ai_reports_to_review[mod_channel_message.id] = ai_report
                             await channel.send("Type 'ai_review' to manually review the reported message" )
+                            
         elif message.channel.name == f'group-{self.group_num}-mod':
             # Handle a help message
             if message.content == Review.HELP_KEYWORD:
